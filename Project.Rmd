@@ -1,0 +1,187 @@
+---
+title: "Practical Machine Learning - Project Writeup"
+output: html_document
+---
+
+Introduction
+--
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+Environment Setup
+--
+
+```{r}
+library(caret)
+library(ggplot2)
+library(doParallel)
+
+setwd("~/../Desktop/Coursera -Data Science Track/Practical Machine Learning//Project")
+
+#function to write an individual file for each problem id
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+```
+
+Data Preparation
+--
+
+The training set will be read in and it will be split 60% for training and 40% for testing. Variables that mainly (> 90% of the time) contain empty strings or NA values will be excluded from use in the model. Additionally the "classe", "user_name" and "new_window" variables will be turned into factor variables. All other variables will be used in the model building process, as the algorithm that will be used, Gradient Boosting Machines, is robust enough to ignore variables that are not useful.
+
+```{r cache=TRUE}
+pml_train <- read.csv("pml-training.csv"
+                      ,stringsAsFactors=FALSE
+                      )
+
+#turn these variables into factors
+pml_train$classe <- as.factor(pml_train$classe)
+pml_train$user_name <- as.factor(pml_train$user_name)
+pml_train$new_window <- as.factor(pml_train$new_window)
+
+#use 60% of the data for training
+train_size <- .6
+train_x <- sample(x=pml_train$X,size = ceiling(nrow(pml_train) * train_size))
+train <- pml_train$X %in% train_x
+
+#create a testing set to validate against
+test <- !(train)
+
+
+#replace blank values with NA
+replaceBlankWithNA <- function(x)
+{
+  ifelse(x == "",NA,x)
+}
+
+cols <- colnames(pml_train[train,])
+for(i in 1:length(cols))
+{
+  if(class(pml_train[,cols[i]]) == "character")
+  {
+    pml_train[,cols[i]] <- replaceBlankWithNA(pml_train[,cols[i]])
+  }
+}
+
+
+#do not include these variables as predictors
+vars_to_exclude <- c('X'
+                    ,'classe'
+                    ,'raw_timestamp_part_1'
+                    ,'raw_timestamp_part_2'
+                    ,'cvtd_timestamp'    
+)
+
+#find all the variables that contain NAs in them
+nas <- sapply(pml_train,is.na)
+nas_list <- colSums(nas)
+nas_to_exclude <- names(nas_list[nas_list > 0])
+
+
+predictors <- cols[!(cols %in% vars_to_exclude | cols %in% nas_to_exclude)]
+
+#create a new data set containing all of the original observations, but only a subset of the variables
+pml_train_subset <- pml_train[,c(predictors,'classe')]
+
+#clean up some of the objects from the environment
+rm(nas)
+rm(nas_list)
+rm(pml_train)
+
+```
+
+Model Building
+--
+
+The model built will be a Gradient Boosting Machine (gbm). Various tuning parameters will be tried to achieve a good model. The best model of the canidate models will be choosen using 10 fold cross validation. 
+```{r cache=TRUE}
+#create a cluster to execute the training in parallel.
+registerDoParallel(cores = 7)
+
+## use 10-fold Cross Validation
+fitControl <- trainControl(
+  method = "cv",
+  number = 10)
+
+#set seed
+set.seed(1234)
+
+#define the different tuning parameters to try and compare for GBM
+gbmGrid <-  expand.grid(interaction.depth = c(5,10,20),
+                        n.trees = (1:20)*5,
+                        shrinkage = c(0.1))
+
+#use caret to build the GBM model, with the grid of different tuning parameters and CV.
+m1 <- train(classe ~ ., data = pml_train_subset[train,c(predictors,'classe')]
+            , trControl = fitControl
+            , method = "gbm",tuneGrid = gbmGrid )
+```
+
+
+Model Evaluation 
+--
+
+The final model has a max tree depth of: 20 and uses 75 trees. The Accuracy from 10 fold cross-validation on this model is: 0.9982169. The accuracy from the cross validation should be very close to the actual accuracy on the test set. 
+
+```{r}
+#best model
+m1$bestTune
+
+#Accuracy of best model
+m1$results[m1$results$n.trees==m1$bestTune$n.trees & 
+             m1$results$interaction.depth ==m1$bestTune$interaction.depth,]$Accuracy
+
+```
+
+The below chart shows how the accuracy changes while using different tuning parameters.
+```{r}
+#plot the Accuracy from Cross Validation
+trellis.par.set(caretTheme())
+plot(m1)
+
+```
+
+As further validation of the accuracy the test set that was withheld from training is predicted using the final model, and you can see that the accuracy (0.9996177) on this test set is very close to the accuracy measured during cross validation (0.9982169). This provides additional confidence that the model will perform well.
+```{r cache=TRUE}
+#predict on the test set that was split from the training set
+test_predictions <- predict(m1, newdata = pml_train_subset[test,c(predictors)])
+
+#Accuracy on the test set that was split from the training set
+sum(ifelse(test_predictions == pml_train_subset[test,]$classe,1,0)) / length(test_predictions)
+
+```
+
+Here's a confusion matrix of predicted values on the withheld test set.
+```{r cache=TRUE}
+#View a confusion matrix of the truth and predicted values
+table(test_predictions,pml_train_subset[test,]$classe)
+
+```
+
+
+Predictions on Test Set
+--
+
+Finally the test set that was provided for the project will be predicted on using the final model. The predictions will be written out to individuals files.
+
+```{r cache=TRUE}
+#read in the provided test set
+pml_test <- read.csv("pml-testing.csv",stringsAsFactors=FALSE)
+
+#turn these variables into factors.
+pml_test$user_name <- as.factor(pml_test$user_name)
+pml_test$new_window <- as.factor(pml_test$new_window)
+
+#predict the classes for the provided test set
+answers <- predict(m1, newdata = pml_test[,c(predictors)])
+
+#write out individuals files for the 
+pml_write_files(answers)
+
+#turn off cluster for parallel execution
+stopImplicitCluster()
+```
