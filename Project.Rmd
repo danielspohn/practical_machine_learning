@@ -5,7 +5,7 @@ output: html_document
 
 Introduction
 --
-Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
 
 Environment Setup
 --
@@ -111,8 +111,8 @@ fitControl <- trainControl(
 set.seed(1234)
 
 #define the different tuning parameters to try and compare for GBM
-gbmGrid <-  expand.grid(interaction.depth = c(5,10,20,25),
-                        n.trees = (1:50)*2,
+gbmGrid <-  expand.grid(interaction.depth = c(5,10,20),
+                        n.trees = (1:20)*5,
                         shrinkage = c(0.1))
 
 #use caret to build the GBM model, with the grid of different tuning parameters and CV.
@@ -125,11 +125,16 @@ m1 <- train(classe ~ ., data = pml_train_subset[train,c(predictors,'classe')]
 Model Evaluation 
 --
 
-The final model has a max tree depth of: 20 and uses 100 number of trees. The Accuracy from 10 fold cross validation on this model is: .9988961. The accuracy from the cross validation should be very close to the actual accuracy on the test set. 
+The final model has a max tree depth of: 20 and uses 75 trees. The Accuracy from 10 fold cross-validation on this model is: 0.9982169. The accuracy from the cross validation should be very close to the actual accuracy on the test set. 
 
 ```{r}
 #best model
-m1$results[m1$results$n.trees==100 & m1$results$interaction.depth ==20,]$Accuracy
+m1$bestTune
+
+#Accuracy of best model
+m1$results[m1$results$n.trees==m1$bestTune$n.trees & 
+             m1$results$interaction.depth ==m1$bestTune$interaction.depth,]$Accuracy
+
 ```
 
 The below chart shows how the accuracy changes while using different tuning parameters.
@@ -140,7 +145,7 @@ plot(m1)
 
 ```
 
-As further validation of the accuracy the test set that was withheld from training is predicted using the final model, and you can see that the accuracy (0.9983435) on this test set is very close to the accuracy measured during cross validation (.9988961). This provides additional confidence that the model will perform well.
+As further validation of the accuracy the test set that was withheld from training is predicted using the final model, and you can see that the accuracy (0.9996177) on this test set is very close to the accuracy measured during cross validation (0.9982169). This provides additional confidence that the model will perform well.
 ```{r cache=TRUE}
 #predict on the test set that was split from the training set
 test_predictions <- predict(m1, newdata = pml_train_subset[test,c(predictors)])
